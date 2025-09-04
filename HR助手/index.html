@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HR智能合规审查助手</title>
+    <style>
+        body { font-family: sans-serif; background-color: #f4f7f9; color: #333; display: flex; flex-direction: column; align-items: center; margin: 0; min-height: 100vh; }
+        header, main, footer { width: 90%; max-width: 700px; text-align: center; margin: 20px 0; }
+        h1 { color: #0052cc; }
+        .upload-box { border: 2px dashed #0052cc; border-radius: 10px; padding: 40px 20px; cursor: pointer; background-color: #ffffff; }
+        .upload-box.dragover { background-color: #e9f2ff; }
+        .file-name { margin-top: 15px; font-weight: bold; color: #0052cc; }
+        #analyze-btn { margin-top: 20px; padding: 12px 25px; font-size: 16px; font-weight: bold; color: #fff; background-color: #0052cc; border: none; border-radius: 5px; cursor: pointer; }
+        #analyze-btn:disabled { background-color: #a5adba; cursor: not-allowed; }
+        .status { margin-top: 20px; font-size: 14px; color: #5e6c84; min-height: 20px; }
+        .result-box { margin-top: 20px; background-color: #ffffff; border-radius: 10px; padding: 20px; text-align: left; width: 100%; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .result-box h2 { text-align: center; margin-top: 0; color: #0052cc; }
+        #result { white-space: pre-wrap; word-wrap: break-word; }
+        #result a { color: #0052cc; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <header><h1>HR 智能合规审查助手</h1><p>上传您的员工手册或劳动合同，AI将为您进行深度风险分析。</p></header>
+    <main>
+        <div id="upload-box" class="upload-box"><p>将文件拖拽到此处，或点击选择</p><p id="file-name" class="file-name"></p><input type="file" id="file-input" hidden accept=".doc,.docx,.pdf"></div>
+        <button id="analyze-btn" disabled>开始分析</button>
+        <div id="status" class="status"></div>
+        <div id="result-box" class="result-box"><h2>分析结果</h2><div id="result"><p>请先上传文件并开始分析...</p></div></div>
+    </main>
+    <footer><p>由 Coze Bot 强力驱动</p></footer>
+    <script>
+        const uploadBox = document.getElementById('upload-box');
+        const fileInput = document.getElementById('file-input');
+        const fileNameDisplay = document.getElementById('file-name');
+        const analyzeBtn = document.getElementById('analyze-btn');
+        const statusDisplay = document.getElementById('status');
+        const resultDisplay = document.getElementById('result');
+        let uploadedFile = null;
+        uploadBox.addEventListener('click', () => fileInput.click());
+        uploadBox.addEventListener('dragover', (e) => { e.preventDefault(); uploadBox.classList.add('dragover'); });
+        uploadBox.addEventListener('dragleave', () => uploadBox.classList.remove('dragover'));
+        uploadBox.addEventListener('drop', (e) => { e.preventDefault(); uploadBox.classList.remove('dragover'); if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]); });
+        fileInput.addEventListener('change', () => { if (fileInput.files.length > 0) handleFile(fileInput.files[0]); });
+        function handleFile(file) {
+            uploadedFile = file;
+            fileNameDisplay.textContent = `已选择文件: ${file.name}`;
+            analyzeBtn.disabled = false;
+            statusDisplay.textContent = "";
+            resultDisplay.innerHTML = "<p>准备就绪，请点击“开始分析”</p>";
+        }
+        analyzeBtn.addEventListener('click', async () => {
+            if (!uploadedFile) { return alert("请先选择一个文件！"); }
+            statusDisplay.textContent = "正在上传文件...";
+            analyzeBtn.disabled = true;
+            resultDisplay.innerHTML = "";
+            try {
+                const formData = new FormData();
+                formData.append('file', uploadedFile);
+                const response = await fetch('/api/proxy', {
+                    method: 'POST',
+                    body: formData,
+                });
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`请求失败: ${errorText}`);
+                }
+                const result = await response.json();
+                statusDisplay.textContent = "分析完成！";
+                if (result.finalContent) {
+                    const contentWithLinks = result.finalContent.replace(/(https?:\/\/[^\s]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+                    resultDisplay.innerHTML = `<p>${contentWithLinks}</p>`;
+                } else {
+                    resultDisplay.textContent = `API返回错误: ${result.errorMessage || "未知错误"}`;
+                }
+            } catch (error) {
+                statusDisplay.textContent = "发生错误！";
+                resultDisplay.textContent = `错误详情: ${error.message}`;
+            } finally {
+                analyzeBtn.disabled = false;
+            }
+        });
+    </script>
+</body>
+</html>
