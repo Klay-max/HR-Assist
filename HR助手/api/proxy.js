@@ -16,12 +16,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        // --- 步骤 1: 从前端接收上传的文件 ---
-        // 【核心修正】: 使用 formidable.formidable() 来创建实例
-        const form = formidable.formidable({ 
-            maxFileSize: 10 * 1024 * 1024,
-            keepExtensions: true 
-        });
+        const form = formidable.formidable({ maxFileSize: 10 * 1024 * 1024, keepExtensions: true });
         const [fields, files] = await form.parse(req);
         const uploadedFile = files.file[0];
 
@@ -29,19 +24,16 @@ export default async function handler(req, res) {
             return res.status(400).json({ errorMessage: '未找到上传的文件' });
         }
 
-        // --- 步骤 2: 在后端将文件读取并编码为Base64 ---
         const fileContent = fs.readFileSync(uploadedFile.filepath);
         const base64File = `data:${uploadedFile.mimetype};base64,${fileContent.toString('base64')}`;
         
-        // --- 步骤 3: 从Vercel的环境变量中安全地获取Coze凭证 ---
         const cozeApiKey = process.env.COZE_API_KEY; 
         const cozeBotId = process.env.COZE_BOT_ID;
         
         if (!cozeApiKey || !cozeBotId) {
-            return res.status(500).json({ errorMessage: '服务器未配置Coze凭证,请在Vercel后台设置环境变量' });
+            return res.status(500).json({ errorMessage: '服务器未配置Coze凭证' });
         }
 
-        // --- 步骤 4: 构建发送给Coze API的请求体 ---
         const queryPayload = {
             file_info: {
                 file_name: uploadedFile.originalFilename,
@@ -54,15 +46,16 @@ export default async function handler(req, res) {
             bot_id: cozeBotId,
             user: "server_user_" + Date.now(),
             query: JSON.stringify(queryPayload),
-            stream: false,
+            // 【核心改动】: 开启流式输出
+            stream: true, 
         };
 
-        // --- 步骤 5: 调用Coze API ---
         const cozeResponse = await fetch("https://api.coze.cn/open_api/v2/chat", {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${cozeApiKey}`,
                 'Content-Type': 'application/json',
+                'Accept': 'text/event-stream', // 告诉Coze我们要接收流式数据
             },
             body: JSON.stringify(cozeRequestBody),
         });
@@ -71,16 +64,36 @@ export default async function handler(req, res) {
             const errorText = await cozeResponse.text();
             throw new Error(`Coze API 返回错误: ${errorText}`);
         }
+        
+        // --- 处理流式响应 ---
+        let finalContent = "";
+        let conversationId = "";
 
-        const cozeResult = await cozeResponse.json();
-
-        // --- 步骤 6: 将Coze的分析结果返回给前端网页 ---
-        const botMessage = cozeResult.messages?.find(msg => msg.type === 'answer');
-        if (botMessage && botMessage.content) {
-            res.status(200).json({ finalContent: botMessage.content });
-        } else {
-            res.status(500).json({ errorMessage: `Coze API未返回有效内容: ${JSON.stringify(cozeResult)}` });
+        for await (const chunk of cozeResponse.body) {
+            const lines = chunk.toString('utf8').split('\n');
+            for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    try {
+                        const data = JSON.parse(line.substring(6));
+                        if (data.message && data.message.type === 'answer') {
+                            finalContent += data.message.content;
+                        }
+                        if (data.conversation_id) {
+                            conversationId = data.conversation_id;
+                        }
+                    } catch (e) {
+                        // 忽略无法解析的行
+                    }
+                }
+            }
         }
+
+        if (finalContent) {
+            res.status(200).json({ finalContent: finalContent });
+        } else {
+            res.status(500).json({ errorMessage: `Coze API未返回有效内容。` });
+        }
+
     } catch (error) {
         console.error("Proxy Function Error:", error);
         res.status(500).json({ errorMessage: error.message });
