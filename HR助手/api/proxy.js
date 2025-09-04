@@ -1,30 +1,25 @@
 // api/proxy.js
 
-// 引入 formidable 和 fs 模块
 const formidable = require('formidable');
 const fs = require('fs');
-
-// 【核心修正】: 使用动态 import() 的方式来加载新版本的 node-fetch
 const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
 
-// Vercel 平台需要这个配置来正确处理文件上传
 export const config = {
     api: {
         bodyParser: false,
     },
 };
 
-// 云函数的主处理逻辑
 export default async function handler(req, res) {
-    // 只接受POST请求
     if (req.method !== 'POST') {
         return res.status(405).send('Method Not Allowed');
     }
 
     try {
         // --- 步骤 1: 从前端接收上传的文件 ---
-        const form = formidable({ 
-            maxFileSize: 10 * 1024 * 1024, // 限制最大文件大小为10MB
+        // 【核心修正】: 使用 formidable.formidable() 来创建实例
+        const form = formidable.formidable({ 
+            maxFileSize: 10 * 1024 * 1024,
             keepExtensions: true 
         });
         const [fields, files] = await form.parse(req);
@@ -58,7 +53,7 @@ export default async function handler(req, res) {
         const cozeRequestBody = {
             bot_id: cozeBotId,
             user: "server_user_" + Date.now(),
-            query: JSON.stringify(queryPayload), // 将包含文件信息的JSON打包成字符串
+            query: JSON.stringify(queryPayload),
             stream: false,
         };
 
@@ -87,8 +82,7 @@ export default async function handler(req, res) {
             res.status(500).json({ errorMessage: `Coze API未返回有效内容: ${JSON.stringify(cozeResult)}` });
         }
     } catch (error) {
-        // 如果中间任何环节出错，捕获错误并返回给前端
-        console.error("Proxy Function Error:", error); // 在Vercel后台日志中打印详细错误
+        console.error("Proxy Function Error:", error);
         res.status(500).json({ errorMessage: error.message });
     }
 }
